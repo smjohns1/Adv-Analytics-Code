@@ -1,0 +1,736 @@
+---
+title: "HW1"
+---
+Loading libraries in.
+```{r}
+#loading libraries in
+suppressPackageStartupMessages({
+    library(Hmisc) # Contains many functions useful for data analysis
+    library(checkmate) # Fast and Versatile Argument Checks
+    library(corrr) # Correlations in R
+    library(conflicted) # Makes it easier to handle same named functions that are in different packages
+    library(readxl) # reading in Excel files
+    library(dplyr) # data manipulation
+    library(tidyr) # Tidy Messy Data and pivot_longer and pivot_wider
+    library(ggplot2) # data visualization
+    library(knitr) # knitting data into HTML, Word, or PDF
+    library(evaluate) # Parsing and Evaluation Tools that Provide More Details than the Default
+    library(iopsych) # Methods for Industrial/Organizational Psychology
+    library(psych) # Procedures for Psychological, Psychometric, and Personality Research
+    library(quantreg) # Quantile Regression
+    library(lavaan) # confirmatory factor analysis (CFA) and structural equation modeling (SEM)
+    library(xtable) # Export Tables to LaTeX or HTML
+    library(reshape2) # transforming data between wide and long (tall)
+    library(GPArotation) # GPA Factor Rotation
+    library(Amelia) # A Program for Missing Data
+    # library(esquisse) # Explore and Visualize Your Data Interactively
+    library(expss) # Tables, Labels and Some Useful Functions from Spreadsheets and 'SPSS' Statistics
+    library(multilevel) # Multilevel Functions
+    library(janitor) # 	Simple Tools for Examining and Cleaning Dirty Data
+    library(mice) # Multivariate Imputation by Chained Equations
+    library(skimr) # Exploratory Data Analysis
+    library(lmtest) # A collection of tests, data sets, and examples for diagnostic checking in linear regression models
+    library(naniar) # helps with missing data
+    library(tidylog) # Creates a log to tell you what your tidyverse commands are doing to the data. NOTE: MAKE SURE TO ALWAYS LOAD LAST!!!
+})
+
+for (f in getNamespaceExports("tidylog")) {
+    conflicted::conflict_prefer(f, "tidylog", quiet = TRUE)
+}
+
+```
+
+Importing the data and naming it "Data"
+```{r}
+#importing data
+library(haven)
+Data <- read_sav("SAQ.sav")
+```
+
+
+Glimpsing at what the data looks like and getting rid of the columns we won't use
+```{r}
+#Glimpsing data and removing columns not needed
+glimpse(Data) 
+Data_23 <- Data %>%
+    select(-c(FAC1_1,
+              FAC2_1,
+              FAC3_1,
+              FAC4_1,
+              FAC1_2,
+              FAC2_2,
+              FAC3_2,
+              FAC4_2))
+```
+
+Looking for reverse coded variables. It looks like Question 3 is reverse coded due to the wording of the item.
+```{r}
+#looking for reverse coded variables
+#looks like question 3 is reverse coded
+library(skimr)
+```
+
+Reverse scoring question 3
+```{r}
+#reverse scoring question 3
+Data_23$Question_03 <- 6 - Data_23$Question_03
+
+```
+
+Looking for missing data. None is found - okay to proceed
+```{r}
+skim(Data_23)
+#looking for missing data - none so we're good to continue
+missmap(Data_23, y.at=c(1), y.labels=c(''), col=c('yellow', 'black'))
+
+```
+
+Looking for outliers. There are 97 outliers found.
+```{r}
+##lookin for outliers
+set.seed(2024)
+cutoff = qchisq(1-.001, ncol(Data_23))
+mahal = mahalanobis(Data_23,
+                    colMeans(Data_23),
+                    cov(Data_23))
+cutoff ##cutoff score
+ncol(Data_23) ##df
+summary(mahal < cutoff)
+```
+
+Adding the outliers to a new dataset
+```{r}
+#Adding outliers to a new dataset
+data_23_mahal <- Data_23 %>%
+    bind_cols(mahal) %>%
+    rename(mahal = `...24`) # renaming the new column "mahal"
+```
+
+Rename the outlier column to mahal_out so we can view them. No recognizable patterns. 
+```{r}
+#Renaming the outliers column
+mahal_out <- data_23_mahal %>%
+    filter(mahal > cutoff) %>%
+    arrange(desc(mahal)) # sort mahal values from most to least
+```
+
+Removing outliers to increase likelihood of not violating assumptions.
+```{r}
+##exclude outliers
+data_23_noout <- Data_23 %>%
+    filter(mahal < cutoff)
+```
+
+Looking at additivity 
+```{r}
+##additivity
+correl = cor(data_23_noout, use = "pairwise.complete.obs")
+
+symnum(correl)
+
+correl
+```
+No "B"s so no perfect correlations which indicate low chance of multicollinearity. We are okay to proceed.
+
+
+Trying out the data in a regression analysis
+```{r}
+##assumption set up
+#regression analysis
+random <- rchisq(nrow(data_23_noout), 7)
+fake <- lm(random~., # Y is predicted by all variables in the data
+          data = data_23_noout) # You can use categorical variables now!
+standardized <- rstudent(fake) # Z-score all of the values to make it easier to interpret.
+fitted <- scale(fake$fitted.values)
+```
+
+Checking the residuals of the standardized values
+```{r}
+##normality
+hist(standardized)
+```
+Normalish - okay to use - no patterns.
+
+Testing heteroscadascity
+```{r}
+#load lmtest library
+library(lmtest)
+
+#perform Breusch-Pagan Test
+bptest(fake)
+```
+The test statistic is 14.07 and the corresponding p-value is 0.92. Since the p-value is not less than 0.05, we fail to reject the null hypothesis. We do not have sufficient evidence to say that heteroscedasticity is present in the regression model.
+
+
+Looking at linearity of standardized values.
+```{r}
+##linearity
+qqnorm(standardized)
+abline(0,1)
+```
+Doesn't curve that much. Between -2 and 2, it mostly stays on the line. We'll say it's good for this analysis.
+
+Testing homogeneity with standardized values.
+```{r}
+##homogeneity
+plot(fitted,standardized)
+abline(0,0)
+abline(v = 0)
+```
+Not seeing much of a shape - so we will say it is good. Doesn't look like a funnel which is a bad indicator. 
+
+Looking at correlation using Bartlett's test. 
+
+```{r}
+##correlation adequacy Bartlett's test
+cortest.bartlett(correl, n = nrow(data_23_noout))
+```
+P value is less than .05. We are good to proceed.
+
+Looking at MSA. 
+
+```{r}
+KMO(correl[,1:23])
+```
+
+The mean sampling adequacy (MSA) was .93, which is a good score.
+
+The data looks good to begin our exploratory factor analysis on. I will rename our dataset that had the initial analysis done on it to our old name (Data) for cohesion sake. 
+
+```{r}
+#renaming dataset that had inital analysis done
+Data <- data_23_noout
+```
+
+Generating histograms of all the items. Majority are right skewed.
+```{r}
+#Visualizing the data by looking at the distribution of each variable
+par(mfrow =c(2,2))
+hist(Data$Question_01,breaks = 6)
+hist(Data$Question_02, breaks = 6)
+hist(Data$Question_03, breaks = 6)
+hist(Data$Question_04, breaks = 6)
+hist(Data$Question_05, breaks = 6)
+hist(Data$Question_06, breaks = 6)
+hist(Data$Question_07, breaks = 6)
+hist(Data$Question_08, breaks = 6)
+hist(Data$Question_09, breaks = 6)
+hist(Data$Question_10, breaks = 6)
+hist(Data$Question_11, breaks = 6)
+hist(Data$Question_12, breaks = 6)
+hist(Data$Question_13, breaks = 6)
+hist(Data$Question_14, breaks = 6)
+hist(Data$Question_15, breaks = 6)
+hist(Data$Question_16, breaks = 6)
+hist(Data$Question_17, breaks = 6)
+hist(Data$Question_18, breaks = 6)
+hist(Data$Question_19, breaks = 6)
+hist(Data$Question_20, breaks = 6)
+hist(Data$Question_21, breaks = 6)
+hist(Data$Question_22, breaks = 6)
+hist(Data$Question_23, breaks = 6)
+```
+
+
+
+# Exploratory Factor Analysis (EFA)
+
+First, we need to split our data into a Training and a Test set. For the purposes of this HW, we will split it 50/50. We will also set the seed so our analysis is replacable. 
+
+```{r}
+#' <!-- ####################################################################################################### -->
+#' <!-- ####################################################################################################### -->
+#' <!-- ##########################EXPLORATORY FACTOR ANALYSIS ################################################# -->
+
+#' ## Split Data into Training and Test set
+
+#' Now we will split the data into a training (EFA) and test (CFA) set.
+
+#' We will also leave the missing data as is for now.
+
+set.seed(4321) #This can be any number. 
+```
+
+Let's create an ID variable for our data set.
+
+```{r}
+#' Let's create an ID variable for our data set.
+
+Data <- Data %>% 
+    mutate(ID = row_number())
+```
+
+Moving our ID variable to the front
+```{r}
+#Moving our ID variable to the front
+
+Data <- Data %>%
+    dplyr::select(ID, everything())
+```
+
+Checking that the variable is in the front of our columns
+```{r}
+#Checking that the variable is in the front of our columns
+
+colnames(Data)
+```
+
+Now, let's create our Training and Test set and make it 50/50. 
+```{r}
+#Now, let's create our Training and Test set and make it 50/50. 
+#using the same seed as earlier
+set.seed(4321)
+training <- sample(Data$ID, length(Data$ID)*0.5)
+
+Data_training <- subset(Data, ID %in% training)
+Data_test <- subset(Data, !(ID %in% training))
+```
+
+Looking at the correlation
+```{r}
+#Looking at the correlation
+
+library(corrr)
+
+Cor_Mat <- Data_training %>%
+    correlate() %>% 
+    shave() %>% # Remove upper triangle
+    fashion() # Print in nice format
+
+print(Cor_Mat)
+```
+
+Flatten Correlation Matrix Function
+
+```{r}
+#Flatten Correlation Matrix Function
+
+flattenCorrMatrix <- function(cormat, pmat, nmat) {
+    ut <- upper.tri(cormat)
+    data.frame(
+        row = rownames(cormat)[row(cormat)[ut]],
+        column = rownames(cormat)[col(cormat)[ut]],
+        cor  =(cormat)[ut],
+        p = pmat[ut],
+        n = nmat[ut]
+    )
+}
+```
+
+Making our training set a matrix
+```{r}
+#As a matrix
+Data_training_MAT <- as.matrix(Data_training)
+```
+
+```{r}
+library(Hmisc)
+#install.packages("checkmate", dependencies = TRUE)
+library(checkmate)
+res <- rcorr(Data_training_MAT)
+print(res)
+library(corrr)
+
+Data_Flat_Cor_Mat_stretch <- Data_training %>%
+    select(-ID) %>% # remove ID variable since we don't need it
+    correlate() %>% # calculate correlations
+    stretch() %>% # make it tall
+    fashion() # round it
+
+Data_Flat_Cor_Mat_stretch
+```
+
+Now we will run the EFA using parallel analysis. We will use this to gain an idea of how many factors to use for our EFA. It indicates 8 factors.
+```{r}
+#Running EFA using parallel analysis
+library(psych)
+fa.parallel(Data_training[c(2:24)])
+```
+let's start with a 6 factor solution and work up. We are starting with 6 because we subtracted 2 from the inital factor value (8) and will work our way up.
+
+NOTE: The variable naming convention is as follows:
+* fa = Factor Analysis
+* ml = Maximum Likelihood (the method of factor analysis we are using)
+* 6 = the number of factors we think are in the data
+* trn = the training data (as opposed to the test data where we would run a follow up CFA to "confirm" the factor structure)
+
+EFA with 6 factors and ML
+```{r}
+#EFA with 6 factors and ML
+fa_ml_6_trn <- fa(Data_training[c(2:24)], nfactors = 6, fm="ml")
+
+print(fa_ml_6_trn)
+```
+
+making cutoff score .3
+```{r}
+#making cutoff score .3
+print(fa_ml_6_trn$loadings, cutoff = .3)
+```
+
+Rotating it for interpretability using oblimin
+```{r}
+#Rotating it for interpretability using oblimin
+fa_ml_6_trn <- fa(Data_training[c(2:24)], nfactors = 6, fm="ml", rotate="oblimin")
+
+print(fa_ml_6_trn)
+
+print(fa_ml_6_trn$loadings, cutoff = .3)
+```
+
+Exporting to Excel
+```{r}
+#export to excel
+fa_ml_6_factor_loadings <- as.data.frame(round(unclass(fa_ml_6_trn$loadings), 3)) %>%
+    tibble::rownames_to_column("items")
+
+openxlsx::write.xlsx(fa_ml_6_factor_loadings, "C:/Users/smjoh/Downloads/Adv Analytics/fa_ml_6_factor_loadings.xlsx")
+```
+
+
+We don't want factor correlations to be too high - we see here that ours are not that high except for ML1 and ML6 that has a factor correlation of 0.64. MIC - the higher the better. We don't want to see cross loadings and we want high loadings. RMSEA we want low. Ours = 0.035, Tucker Lewis .95 is minimum and ours is 0.961 which is good. 
+
+Now let's try a 7 factor solution
+```{r}
+#7 factors
+fa_ml_7_trn <- fa(Data_training[c(2:24)], nfactors = 7, fm="ml", rotate="oblimin")
+
+print(fa_ml_7_trn)
+
+print(fa_ml_7_trn$loadings, cutoff = 0.3)
+```
+
+Tucker lewis went up = 0.972, RMSEA went down a little = 0.03, BIC went up a little = -567.11, correlations between factors went down a little, still have one cross loading
+
+Export to Excel
+```{r}
+#export to excel
+fa_ml_7_factor_loadings_all <- as.data.frame(round(unclass(fa_ml_7_trn$loadings), 3)) %>%
+    tibble::rownames_to_column("items")
+
+openxlsx::write.xlsx(fa_ml_7_factor_loadings_all, "C:/Users/smjoh/Downloads/Adv Analytics/fa_ml_7_factor_loadings_all.xlsx")
+```
+
+Let's try dropping the ones that are cross loading
+```{r}
+Data_training_MOD <- Data_training %>%
+    dplyr::select(-c(Question_18))
+```
+
+Get number of columns
+```{r}
+colnames(Data_training_MOD)
+```
+Rerun it both models with 6 and 7 factors
+
+```{r}
+#6 factor without question 18
+fa_ml_6_trn_MOD <- fa(Data_training_MOD[c(2:23)], nfactors = 6, fm="ml", rotate="oblimin") # make sure the [2:XX] reflects the correct columns after removing items
+
+print(fa_ml_6_trn_MOD)
+
+print(fa_ml_6_trn_MOD$loadings, cutoff = .3)
+```
+
+Export to Excel
+```{r}
+#export to excel
+fa_ml_6_factor_loadings_18 <- as.data.frame(round(unclass(fa_ml_6_trn_MOD$loadings), 3)) %>%
+    tibble::rownames_to_column("items")
+
+openxlsx::write.xlsx(fa_ml_6_factor_loadings_18, "C:/Users/smjoh/Downloads/Adv Analytics/fa_ml_6_factor_loadings_18.xlsx")
+```
+
+
+7 factor without question 18
+```{r}
+#7 factor without question 18
+fa_ml_7_trn_MOD <- fa(Data_training_MOD[c(2:23)], nfactors = 7, fm="ml", rotate="oblimin") # make sure the [2:XX] reflects the correct columns after removing items
+
+print(fa_ml_7_trn_MOD)
+
+print(fa_ml_7_trn_MOD$loadings, cutoff = .3)
+```
+
+
+Put in excel
+```{r}
+#export to excel
+fa_ml_7_factor_loadings <- as.data.frame(round(unclass(fa_ml_7_trn_MOD$loadings), 3)) %>%
+    tibble::rownames_to_column("items")
+
+openxlsx::write.xlsx(fa_ml_7_factor_loadings, "C:/Users/smjoh/Downloads/Adv Analytics/fa_ml_7_factor_loadings.xlsx")
+```
+
+7 factor EFA without question 15 and 21 because they were both cross loading and leaving only one item for one factor.
+```{r}
+#EFA without questions 15 and 21
+Data_training_MOD3 <- Data_training %>%
+    dplyr::select(-c(Question_15, Question_21))
+
+fa_ml_7_trn_MOD3 <- fa(Data_training_MOD3[c(2:22)], nfactors = 7, fm="ml", rotate="oblimin") # make sure the [2:XX] reflects the correct columns after removing items
+
+print(fa_ml_7_trn_MOD3)
+
+print(fa_ml_7_trn_MOD3$loadings, cutoff = .3)
+
+```
+
+
+
+Removing question 15 because it was the only one loading on a factor. Keeping question 21 because it didn't make a difference in terms of cross loading. Fit statistics was worse with question 21 removed so keeping that item in. Rerunning EFA with 7 factors without question 15. Final model for now - still need to do reliability analysis.
+
+```{r}
+#7 factor EFA without question 15
+Data_training_MOD2 <- Data_training %>%
+    dplyr::select(-c(Question_15))
+
+fa_ml_7_trn_MOD2 <- fa(Data_training_MOD2[c(2:23)], nfactors = 7, fm="ml", rotate="oblimin") # make sure the [2:XX] reflects the correct columns after removing items
+
+print(fa_ml_7_trn_MOD2)
+
+print(fa_ml_7_trn_MOD2$loadings, cutoff = .3)
+
+#export to excel
+fa_ml_7_factor_loadings3 <- as.data.frame(round(unclass(fa_ml_7_trn_MOD2$loadings), 3)) %>%
+    tibble::rownames_to_column("items")
+
+openxlsx::write.xlsx(fa_ml_7_factor_loadings3, "C:/Users/smjoh/Downloads/Adv Analytics/fa_ml_7_factor_loadings3.xlsx")
+
+```
+
+
+## Scale building
+
+Now that you have your items from your EFA we need to check out their properties as a scale.
+We will now clean up the data so we can do some scale analysis on it. In order to do this, we want to create a dataframe that only has the items of interest. We'll call on the `dplyr` library and specifically the `select` function which is how you select columns. Instead of selecting the 23 (out of 24 items) remaining columns we want, we will deselect the 1 that we don't.
+```{r}
+#loading training data to bfi items and excluding the ID variable
+library(dplyr)
+bfi_items <- Data_training %>%
+    dplyr::select(-c(ID))
+```
+
+Assigning column numbers to factors
+```{r}
+#Assigning column numbers to factors
+bfi_keys_list <- list(math = c(8, 11, 17),
+                      stats = c(1,4,5,16),
+                      bed = c(20, 21), # 3 items here because we dropped two
+                      comp = c(6,10), #4 items here because we dropped one
+                      spss = c(12,13,14,18), #4 items here because we dropped one
+                      friend = c(2,3,9,19,22,23),
+                      comp2 = c(7))
+bfi_keys <- make.keys(bfi_items, bfi_keys_list, item.labels = colnames(bfi_items))
+```
+
+Now we will score the items.
+```{r}
+#scoring items
+scores <- scoreItems(bfi_keys, bfi_items, impute = "none", 
+                         min = 1, max = 6, digits = 3)
+
+head(scores$scores)
+
+scores_df <- as.data.frame(scores$scores)
+```
+
+Now we'll split out each factor individually to do scale analysis. We can use `select` again and pair it with the helper function `starts_with`. 
+
+```{r}
+#' Now let's split out the data into factors for easier analysis
+library(dplyr)
+
+# Define the groups manually
+math_questions <- c("Question_08", "Question_11", "Question_17")
+stats_questions <- c("Question_01", "Question_04", "Question_05", "Question_16")
+bed_questions <- c("Question_20", "Question_21")
+comp_questions <- c("Question_06", "Question_10")
+spss_questions <- c("Question_12", "Question_13", "Question_14", "Question_18")
+friend_questions <- c("Question_02", "Question_03", "Question_09","Question_19","Question_22","Question_23")
+friend_questions2 <- c("Question_02", "Question_09","Question_19","Question_22","Question_23")
+comp2_questions <- c("Question_07")
+
+# Select the columns based on the defined groups
+math <- bfi_items %>%
+  select(all_of(math_questions))
+
+stats <- bfi_items %>%
+  select(all_of(stats_questions))
+
+bed <- bfi_items %>%
+  select(all_of(bed_questions))
+
+comp <- bfi_items %>%
+  select(all_of(comp_questions))
+
+spss <- bfi_items %>%
+  select(all_of(spss_questions))
+
+friend <- bfi_items %>%
+  select(all_of(friend_questions))
+
+friend2 <- bfi_items %>%
+  select(all_of(friend_questions2))
+
+comp2 <- bfi_items %>%
+  select(all_of(comp2_questions))
+```
+## Scale reliability analysis of MATH
+
+```{r}
+bfi_keys_list <- list(math=c(1, 2, 3))
+
+bfi_keys <- make.keys(math, bfi_keys_list, item.labels = colnames(math))
+
+math_ALPHA <- psych::alpha(x = math[, abs(bfi_keys_list$math)], keys = bfi_keys)
+
+math_total <- round(as.data.frame(math_ALPHA$total), 3)
+math_alpha_drop <- round(as.data.frame(math_ALPHA$alpha.drop), 3)
+math_item_stat <- round(as.data.frame(math_ALPHA$item.stats), 3)
+
+math_ALPHA
+```
+Our r.drop scores for each item is lower than the overall r score so we will keep all items. 
+
+Reliability analysis for stats factor
+```{r}
+#Reliability analysis for stats factor
+bfi_keys_list <- list(stats=c(1, 2, 3,4))
+
+bfi_keys <- make.keys(stats, bfi_keys_list, item.labels = colnames(stats))
+
+stats_ALPHA <- psych::alpha(x = stats[, abs(bfi_keys_list$stats)], keys = bfi_keys)
+
+stats_total <- round(as.data.frame(stats_ALPHA$total), 3)
+stats_alpha_drop <- round(as.data.frame(stats_ALPHA$alpha.drop), 3)
+stats_item_stat <- round(as.data.frame(stats_ALPHA$item.stats), 3)
+
+stats_ALPHA
+```
+Our r.drop scores for each item is lower than the overall r score so we will keep all items. 
+
+Reliability analysis for bed factor
+
+```{r}
+#Reliability analysis for bed factor
+
+bfi_keys_list <- list(bed=c(1, 2))
+
+bfi_keys <- make.keys(bed, bfi_keys_list, item.labels = colnames(bed))
+
+bed_ALPHA <- psych::alpha(x = bed[, abs(bfi_keys_list$bed)], keys = bfi_keys)
+
+bed_total <- round(as.data.frame(bed_ALPHA$total), 3)
+bed_alpha_drop <- round(as.data.frame(bed_ALPHA$alpha.drop), 3)
+bed_item_stat <- round(as.data.frame(bed_ALPHA$item.stats), 3)
+
+bed_ALPHA
+```
+Our r.drop scores for each item is lower than the overall r score so we will keep all items. 
+
+Reliability analysis for comp factor
+
+```{r}
+#Reliability analysis for comp factor
+
+bfi_keys_list <- list(comp=c(1, 2))
+
+bfi_keys <- make.keys(comp, bfi_keys_list, item.labels = colnames(comp))
+
+comp_ALPHA <- psych::alpha(x = comp[, abs(bfi_keys_list$comp)], keys = bfi_keys)
+
+comp_total <- round(as.data.frame(comp_ALPHA$total), 3)
+comp_alpha_drop <- round(as.data.frame(comp_ALPHA$alpha.drop), 3)
+comp_item_stat <- round(as.data.frame(comp_ALPHA$item.stats), 3)
+
+comp_ALPHA
+```
+
+Our r.drop scores for each item is lower than the overall r score so we will keep all items. 
+
+Reliability analysis for SPSS factor
+
+```{r}
+#Reliability analysis for SPSS factor
+
+bfi_keys_list <- list(spss=c(1, 2,3,4))
+
+bfi_keys <- make.keys(spss, bfi_keys_list, item.labels = colnames(spss))
+
+spss_ALPHA <- psych::alpha(x = spss[, abs(bfi_keys_list$spss)], keys = bfi_keys)
+
+spss_total <- round(as.data.frame(spss_ALPHA$total), 3)
+spss_alpha_drop <- round(as.data.frame(spss_ALPHA$alpha.drop), 3)
+spss_item_stat <- round(as.data.frame(spss_ALPHA$item.stats), 3)
+
+spss_ALPHA
+```
+
+Our r.drop scores for each item is lower than the overall r score so we will keep all items. 
+
+Reliability analysis for friend factor
+
+```{r}
+bfi_keys_list <- list(friend=c(1, 2,3,4,5,6))
+
+bfi_keys <- make.keys(friend, bfi_keys_list, item.labels = colnames(friend))
+
+friend_ALPHA <- psych::alpha(x = friend[, abs(bfi_keys_list$friend)], keys = bfi_keys)
+
+friend_total <- round(as.data.frame(friend_ALPHA$total), 3)
+friend_alpha_drop <- round(as.data.frame(friend_ALPHA$alpha.drop), 3)
+friend_item_stat <- round(as.data.frame(friend_ALPHA$item.stats), 3)
+
+friend_ALPHA
+```
+Question 3 has a very low reliability value. Overall reliability increases when it is dropped so we will drop it and rerun.
+
+Rerunning reliability analysis without question 3 for friend factor
+```{r}
+#Rerunning reliability analysis without question 3 for friend factor
+
+bfi_keys_list <- list(friend2=c(1, 2,3,4,5))
+
+bfi_keys <- make.keys(friend2, bfi_keys_list, item.labels = colnames(friend2))
+
+friend2_ALPHA <- psych::alpha(x = friend2[, abs(bfi_keys_list$friend2)], keys = bfi_keys)
+
+friend2_total <- round(as.data.frame(friend2_ALPHA$total), 3)
+friend2_alpha_drop <- round(as.data.frame(friend2_ALPHA$alpha.drop), 3)
+friend2_item_stat <- round(as.data.frame(friend2_ALPHA$item.stats), 3)
+
+friend2_ALPHA
+```
+Overall reliability increased without question 3. 
+
+Rerunning EFA with 7 factors without Question 3
+FINAL MODEL 
+```{r}
+Data_training_MOD4 <- Data_training_MOD2 %>%
+    dplyr::select(-c(Question_03))
+
+fa_ml_7_trn_MOD4 <- fa(Data_training_MOD4[c(2:22)], nfactors = 7, fm="ml", rotate="oblimin") # make sure the [2:XX] reflects the correct columns after removing items
+
+print(fa_ml_7_trn_MOD4)
+
+print(fa_ml_7_trn_MOD4$loadings, cutoff = .3)
+
+#export to excel
+fa_ml_7_factor_loadings4 <- as.data.frame(round(unclass(fa_ml_7_trn_MOD4$loadings), 3)) %>%
+    tibble::rownames_to_column("items")
+
+openxlsx::write.xlsx(fa_ml_7_factor_loadings4, "C:/Users/smjoh/Downloads/Adv Analytics/fa_ml_7_factor_loadings5.xlsx")
+```
+Getting just the code in an r script file
+```{r}
+# Load knitr package
+library(knitr)
+
+# Convert R Markdown file to R script
+knitr::purl("HW1_AA.Rmd", output = "output_script.R")
+
+```
+
+
+
