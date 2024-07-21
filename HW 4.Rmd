@@ -1,0 +1,630 @@
+---
+title: "HW 4"
+output: html_document
+date: "2024-07-20"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r}
+############################################################################################
+# Clear workspace 
+rm(list = ls())
+############################################################################################
+
+#######################################################################################################
+#######################################################################################################
+##################################LOADING PACKAGES#####################################################
+
+################################################################################
+#Do tryCatch here
+
+tryCatch(require(pacman),finally=utils:::install.packages(pkgs='pacman',repos='http://cran.r-project.org'));
+require(pacman)
+
+##if the above doesn't work, use this code##
+##tryCatch
+#detach("package:pacman", unload = TRUE)
+#install.packages("pacman", dependencies = TRUE)
+# ## install.packages("pacman")
+pacman::p_load(openxlsx, 
+               tidyverse, 
+               devtools,
+               conflicted,
+               lubridate,
+               sentimentr)
+
+#Loading libraries
+library(openxlsx)
+library(tidyverse)
+library(devtools)
+library(conflicted)
+library(lubridate)
+library(sentimentr)
+```
+Setting my conflict prefer
+```{r}
+#conflict prefer
+conflict_prefer("filter", "dplyr")
+```
+
+Loading the Honeywell data
+```{r}
+library(readr)
+Data <- read_csv("C:/Users/smjoh/Downloads/glassdoortest1.csv")
+```
+
+Let's get our column names.
+
+```{r}
+cat(colnames(Data), sep = ",\n")
+```
+
+column names
+```{r}
+colnames(Data)
+```
+
+Change X1 to ID
+
+```{r}
+Data <- Data %>%
+    rename(ID = "...1")
+```
+
+We will just look at the Pros for now.
+
+Notice we are creating a new df called Comments_df so that we don't touch the original Data df. This is helpful because we will be slicing, dicing, scattering, etc. to the df in order to split out the text in various ways.
+
+
+
+```{r}
+#' <!--####################################################################################################### -->
+#' <!--####################################################################################################### -->
+#' <!--####################################################################################################### -->
+#' <!--####################################################################################################### -->
+#' <!--####################################################################################################### -->
+#' <!--#####################BRUTE FORCE TOPIC CLASSIFICATION USING REGEX###################################### -->
+
+Comments_df <- Data %>%
+    select(c(ID, pros)) %>%
+    filter(!is.na(pros)) %>%
+    rename('comments_pros' = 'pros')
+
+Comments_df2 <- Data %>%
+    select(c(ID, cons)) %>%
+    filter(!is.na(cons)) %>%
+    rename('comments_cons' = 'cons')
+
+```
+
+
+```{r}
+Comments_df <- Comments_df %>%
+  as_tibble() %>%
+  mutate(comments_pros = str_replace_all(comments_pros, "\uFFFD", "")) 
+
+Comments_df2 <- Comments_df2 %>%
+  as_tibble() %>%
+  mutate(comments_cons = str_replace_all(comments_cons, "\uFFFD", ""))
+```
+
+Convert everything to lowercase for simplicity.
+
+```{r}
+#Converting to lower case
+
+Comments_df <- Comments_df %>%
+    mutate(comments_pros = tolower(comments_pros))
+
+Comments_df2 <- Comments_df2 %>%
+    mutate(comments_cons = tolower(comments_cons))
+
+```
+
+Remove all line breaks.
+
+```{r}
+#Remove all line breaks
+Comments_df$comments_pros <- gsub("[\r\n]", "", Comments_df$comments_pros)
+
+Comments_df <- Comments_df %>%
+    select(ID, comments_pros) %>%
+    na.omit()
+
+Comments_df2$comments_cons <- gsub("[\r\n]", "", Comments_df2$comments_cons)
+
+Comments_df2 <- Comments_df2 %>%
+    select(ID, comments_cons) %>%
+    na.omit()
+```
+
+Now let's create our first known topic. We'll go with benefits for now.
+
+Common ones you may want to look at are:
+
+* Benefits
+* Career advancement
+* Compensation
+* Direct Manager
+* General Management 
+* Safety
+
+What others can you think of?
+
+You can also do subcategories such as:
+
+* Benefits-Health
+* Benefits-Paid Time Off
+
+What others can you think of?
+#OUR HW
+Could you build out your own classifer with ~20 or so meta categories and subcategories as needed?
+
+```{r}
+#Creating a beginning using `now` from lubridate.
+#After we run everything, we will create `end_time <- now()` along with `print(difftime(end_time, start_time))` as the last line of code after everything we are concerned about has run.
+
+start_time <- now()
+```
+
+
+```{r}
+#' <!--#################################### BENEFITS ######################################################### -->
+
+# Define patterns for benefits comments
+benefits <- c('\\brx\\b', 
+              '^.*medic.*$', 
+              '(?=.*bene)(?=.*(?:health))', 
+              '(?=.*coverage)(?=.*(?:medic|deduct|prescrip|insur|drug|health|dependent))', 
+              '\\b(?:health\\W+(?:\\w+\\W+){0,1}?care)\\b', 
+              '\\bhealthcare\\b', 
+              '\\bhealth\\s?care\\b', 
+              '\\b(?:medical\\W+(?:\\w+\\W+){0,3}?benefits|benefits\\W+(?:\\w+\\W+){0,3}?medical)\\b', 
+              '^.*vacation.*$',
+              '\\bpto\\b'
+)
+
+benefits_pattern <- paste(benefits, collapse = "|")
+
+# Apply the pattern to pros comments, creating a new column in TEST directly
+TEST <- Comments_df %>%
+  mutate(benefits = ifelse(grepl(benefits_pattern, comments_pros, perl = TRUE), "Y", "N"))
+
+# Apply the pattern to cons comments, creating a new column in TEST2 directly
+TEST2 <- Comments_df2 %>%
+  mutate(benefits = ifelse(grepl(benefits_pattern, comments_cons, perl = TRUE), "Y", "N"))
+
+```
+
+
+```{r}
+#' <!--####################################################################################################### -->
+
+# Define patterns for benefits and insurance comments
+benefits_insurance <- c('(?=.*insur)(?=.*(?:medic|dental|life|vision|supplement|disabl))',
+                        '\\b(?:insurance\\W+(?:\\w+\\W+){0,1}?premium)\\b',
+                        '\\binsurance\\b')
+
+benefits_insurance_pattern <- paste(benefits_insurance, collapse = "|")
+
+# Apply the pattern to both pros and cons comments, creating new columns in TEST and TEST2 directly
+TEST <- TEST %>%
+  mutate(benefits_insurance = ifelse(grepl(benefits_insurance_pattern, comments_pros, perl = TRUE), "Y", "N"))
+
+TEST2 <- TEST2 %>%
+  mutate(benefits_insurance = ifelse(grepl(benefits_insurance_pattern, comments_cons, perl = TRUE), "Y", "N"))
+
+```
+
+Ok, now let's do compensation.
+
+```{r}
+#' <!--####################################################################################################### -->
+#' <!--####################################################################################################### -->
+#' <!--################################# COMPENSATION ######################################################## -->
+# Define patterns for compensation comments
+compensation <- c('\\bsalary\\b', 
+                  '^.*compen.*$',
+                  '\\bpay\\b',
+                  '^.*incent.*$',
+                  '^.*rate.*$',
+                  '^.*money.*$')
+
+compensation_pattern <- paste(compensation, collapse = "|")
+
+# Apply the pattern to pros comments, creating a new column in TEST directly
+TEST <- TEST %>%
+  mutate(compensation = ifelse(grepl(compensation_pattern, comments_pros, perl = TRUE), "Y", "N"))
+
+# Apply the pattern to cons comments, creating a new column in TEST2 directly
+TEST2 <- TEST2 %>%
+  mutate(compensation = ifelse(grepl(compensation_pattern, comments_cons, perl = TRUE), "Y", "N"))
+
+```
+Work environment category
+```{r}
+# Define patterns for work environment comments
+work_environment <- c(
+  '\\bcoworker\\b',
+  '\\bcolleague\\b',
+  '\\bteam\\b',
+  '\\bmanagement\\b',
+  '\\bmanager\\b',
+  '\\boffice\\s?space\\b',
+  '\\boffice\\b'
+)
+
+work_environment_pattern <- paste(work_environment, collapse = "|")
+
+# Apply the pattern to pros comments, creating a new column in TEST directly
+TEST <- TEST %>%
+  mutate(work_environment = ifelse(grepl(work_environment_pattern, comments_pros, perl = TRUE), "Y", "N"))
+
+# Apply the pattern to cons comments, creating a new column in TEST2 directly
+TEST2 <- TEST2 %>%
+  mutate(work_environment = ifelse(grepl(work_environment_pattern, comments_cons, perl = TRUE), "Y", "N"))
+
+
+```
+Work-life balance category
+```{r}
+# Define patterns for work life balance comments
+work_life_balance <- c(
+  '\\bwork\\s?life\\s?balance\\b',
+  '\\bflexible\\s?hours\\b',
+  '\\bwork\\s?from\\s?home\\b',
+  '\\bovertime\\b',
+  '\\bstress\\b',
+  '\\bholiday\\b'
+)
+
+
+work_life_balance_pattern <- paste(work_life_balance, collapse = "|")
+
+# Apply the pattern to pros comments, creating a new column in TEST directly
+TEST <- TEST %>%
+  mutate(work_life_balance = ifelse(grepl(work_life_balance_pattern, comments_pros, perl = TRUE), "Y", "N"))
+
+# Apply the pattern to cons comments, creating a new column in TEST2 directly
+TEST2 <- TEST2 %>%
+  mutate(work_life_balance = ifelse(grepl(work_life_balance_pattern, comments_cons, perl = TRUE), "Y", "N"))
+
+```
+Job security category
+```{r}
+# Define patterns for job security comments
+job_security <- c(
+  '\\bjob\\s?security\\b',
+  '\\bstability\\b',
+  '\\blayoffs?\\b',
+  '\\bcontract\\b'
+)
+
+
+job_security_pattern <- paste(job_security, collapse = "|")
+
+# Apply the pattern to pros comments, creating a new column in TEST directly
+TEST <- TEST %>%
+  mutate(job_security = ifelse(grepl(job_security_pattern, comments_pros, perl = TRUE), "Y", "N"))
+
+# Apply the pattern to cons comments, creating a new column in TEST2 directly
+TEST2 <- TEST2 %>%
+  mutate(job_security = ifelse(grepl(job_security_pattern, comments_cons, perl = TRUE), "Y", "N"))
+```
+Career Development category
+```{r}
+# Define patterns for career development comments
+career_development <- c(
+  '\\btraining\\b',
+  '\\bmentorship\\b',
+  '\\bpromotion\\b',
+  '\\bpromote\\b',
+  '\\bcareer\\s?growth\\b',
+  '\\blearning\\b',
+  '\\bdevelop\\b'
+)
+
+
+
+career_development_pattern <- paste(career_development, collapse = "|")
+
+# Apply the pattern to pros comments, creating a new column in TEST directly
+TEST <- TEST %>%
+  mutate(career_development = ifelse(grepl(career_development_pattern, comments_pros, perl = TRUE), "Y", "N"))
+
+# Apply the pattern to cons comments, creating a new column in TEST2 directly
+TEST2 <- TEST2 %>%
+  mutate(career_development = ifelse(grepl(career_development_pattern, comments_cons, perl = TRUE), "Y", "N"))
+```
+Company culture category
+```{r}
+# Define patterns for company culture comments
+company_culture <- c(
+  '\\bdiversity\\b',
+  '\\binclusion\\b',
+  '\\bcompany\\s?values\\b',
+  '\\bengagement\\b',
+  '\\brecognition\\b'
+)
+
+
+company_culture_pattern <- paste(company_culture, collapse = "|")
+
+# Apply the pattern to pros comments, creating a new column in TEST directly
+TEST <- TEST %>%
+  mutate(company_culture = ifelse(grepl(company_culture_pattern, comments_pros, perl = TRUE), "Y", "N"))
+
+# Apply the pattern to cons comments, creating a new column in TEST2 directly
+TEST2 <- TEST2 %>%
+  mutate(company_culture = ifelse(grepl(company_culture_pattern, comments_cons, perl = TRUE), "Y", "N"))
+
+# Count the number of "yes" values in the category_col
+yes_count <- sum(TEST2$company_culture == "Y")
+
+# Print the result
+print(yes_count)
+```
+Job sat category
+```{r}
+# Define patterns for job satisfaction comments
+job_satisfaction <- c(
+  '\\bchalleng(?:ing|e)\\b',
+  '\\bfulfillment\\b',
+  '\\bsatisf(?:ied|ying|action)\\b',
+  '\\btask\\s?variety\\b'
+)
+
+job_satisfaction_pattern <- paste(job_satisfaction, collapse = "|")
+
+# Apply the pattern to pros comments, creating a new column in TEST directly
+TEST <- TEST %>%
+  mutate(job_satisfaction = ifelse(grepl(job_satisfaction_pattern, comments_pros, perl = TRUE), "Y", "N"))
+
+# Apply the pattern to cons comments, creating a new column in TEST2 directly
+TEST2 <- TEST2 %>%
+  mutate(job_satisfaction = ifelse(grepl(job_satisfaction_pattern, comments_cons, perl = TRUE), "Y", "N"))
+
+```
+Management category
+```{r}
+# Define patterns for management comments
+management <- c(
+  '\\bleadership\\b',
+  '\\bcommunication\\b',
+  '\\bdecision\\s?making\\b',
+  '\\bsupport\\b'
+)
+
+management_pattern <- paste(management, collapse = "|")
+
+# Apply the pattern to pros comments, creating a new column in TEST directly
+TEST <- TEST %>%
+  mutate(management = ifelse(grepl(management_pattern, comments_pros, perl = TRUE), "Y", "N"))
+
+# Apply the pattern to cons comments, creating a new column in TEST2 directly
+TEST2 <- TEST2 %>%
+  mutate(management = ifelse(grepl(management_pattern, comments_cons, perl = TRUE), "Y", "N"))
+
+```
+Technical resources category
+```{r}
+# Define patterns for technological resources comments
+technological_resources <- c(
+  '\\bequipment\\b',
+  '\\bsoftware\\b',
+  '\\btechnology\\b',
+  '\\btech\\b',
+  '\\binnovation\\b'
+)
+
+technological_resources_pattern <- paste(technological_resources, collapse = "|")
+
+# Apply the pattern to pros comments, creating a new column in TEST directly
+TEST <- TEST %>%
+  mutate(technological_resources = ifelse(grepl(technological_resources_pattern, comments_pros, perl = TRUE), "Y", "N"))
+
+# Apply the pattern to cons comments, creating a new column in TEST2 directly
+TEST2 <- TEST2 %>%
+  mutate(technological_resources = ifelse(grepl(technological_resources_pattern, comments_cons, perl = TRUE), "Y", "N"))
+
+```
+
+Employee perks category
+```{r}
+# Define patterns for employee perks comments
+employee_perks <- c(
+  '\\bcafeteria\\b',
+  '\\bfood\\b',
+  '\\bgym\\b',
+  '\\bevents?\\b',
+  '\\bperks?\\b'
+)
+
+employee_perks_pattern <- paste(employee_perks, collapse = "|")
+
+# Apply the pattern to pros comments, creating a new column in TEST directly
+TEST <- TEST %>%
+  mutate(employee_perks = ifelse(grepl(employee_perks_pattern, comments_pros, perl = TRUE), "Y", "N"))
+
+# Apply the pattern to cons comments, creating a new column in TEST2 directly
+TEST2 <- TEST2 %>%
+  mutate(employee_perks = ifelse(grepl(employee_perks_pattern, comments_cons, perl = TRUE), "Y", "N"))
+
+```
+Job autonomy category
+```{r}
+# Define patterns for job autonomy comments
+job_autonomy <- c(
+  '\\bdecision\\s?making\\b',
+  '\\bindependence\\b',
+  '\\bcreative\\b',
+  '\\bautonomy\\b'
+)
+
+job_autonomy_pattern <- paste(job_autonomy, collapse = "|")
+
+# Apply the pattern to pros comments, creating a new column in TEST directly
+TEST <- TEST %>%
+  mutate(job_autonomy = ifelse(grepl(job_autonomy_pattern, comments_pros, perl = TRUE), "Y", "N"))
+
+# Apply the pattern to cons comments, creating a new column in TEST2 directly
+TEST2 <- TEST2 %>%
+  mutate(job_autonomy = ifelse(grepl(job_autonomy_pattern, comments_cons, perl = TRUE), "Y", "N"))
+
+```
+
+
+```{r}
+# Define patterns for job autonomy comments
+policies_procedures <- c(
+  '\\bbureaucracy\\b',
+  '\\befficiency\\b',   
+  '\\btransparency\\b',   
+  '\\bpolic(?:y|ies)\\b', 
+  '\\bprocedures?\\b',    
+  '\\bcompliance\\b'      
+)
+
+policies_procedures_pattern <- paste(policies_procedures, collapse = "|")
+
+# Apply the pattern to pros comments, creating a new column in TEST directly
+TEST <- TEST %>%
+  mutate(policies_procedures = ifelse(grepl(policies_procedures_pattern, comments_pros, perl = TRUE), "Y", "N"))
+
+# Apply the pattern to cons comments, creating a new column in TEST2 directly
+TEST2 <- TEST2 %>%
+  mutate(policies_procedures = ifelse(grepl(policies_procedures_pattern, comments_cons, perl = TRUE), "Y", "N"))
+
+```
+Location category
+```{r}
+# Define patterns for location comments
+location <- c(
+  '\\bcommute\\b',
+  '\\bon\\s?site\\b',
+  '\\bgeographic\\s?flexibility\\b',
+  '\\bconvenient\\b'
+)
+
+location_pattern <- paste(location, collapse = "|")
+
+# Apply the pattern to pros comments, creating a new column in TEST directly
+TEST <- TEST %>%
+  mutate(location = ifelse(grepl(location_pattern, comments_pros, perl = TRUE), "Y", "N"))
+
+# Apply the pattern to cons comments, creating a new column in TEST2 directly
+TEST2 <- TEST2 %>%
+  mutate(location = ifelse(grepl(location_pattern, comments_cons, perl = TRUE), "Y", "N"))
+
+```
+Performance evaluation category
+```{r}
+# Define patterns for performance eval comments
+performance_evaluation <- c(
+  '\\bfeedback\\b',
+  '\\bevaluation\\b',
+  '\\breview\\b',
+  '\\bperformance\\b',
+  '\\bincentives?\\b'
+)
+
+performance_evaluation_pattern <- paste(performance_evaluation, collapse = "|")
+
+# Apply the pattern to pros comments, creating a new column in TEST directly
+TEST <- TEST %>%
+  mutate(performance_evaluation = ifelse(grepl(performance_evaluation_pattern, comments_pros, perl = TRUE), "Y", "N"))
+
+# Apply the pattern to cons comments, creating a new column in TEST2 directly
+TEST2 <- TEST2 %>%
+  mutate(performance_evaluation = ifelse(grepl(performance_evaluation_pattern, comments_cons, perl = TRUE), "Y", "N"))
+
+```
+Workload category
+```{r}
+# Define patterns for workload comments
+workload <- c(
+  '\\bworkload\\b',
+  '\\btask\\b',
+  '\\bpressure\\b',
+  '\\btime\\s?management\\b'
+)
+
+workload_pattern <- paste(workload, collapse = "|")
+
+# Apply the pattern to pros comments, creating a new column in TEST directly
+TEST <- TEST %>%
+  mutate(workload = ifelse(grepl(workload_pattern, comments_pros, perl = TRUE), "Y", "N"))
+
+# Apply the pattern to cons comments, creating a new column in TEST2 directly
+TEST2 <- TEST2 %>%
+  mutate(workload = ifelse(grepl(workload_pattern, comments_cons, perl = TRUE), "Y", "N"))
+
+```
+
+International opportunities category
+```{r}
+# Define patterns for international opportunities comments
+international_opportunities <- c(
+  '\\bglobal\\s?exposure\\b',
+  '\\brelocation\\b',
+  '\\binternational\\b',
+  '\\bprojects?\\b'
+)
+
+international_opportunities_pattern <- paste(international_opportunities, collapse = "|")
+
+# Apply the pattern to pros comments, creating a new column in TEST directly
+TEST <- TEST %>%
+  mutate(international_opportunities = ifelse(grepl(international_opportunities_pattern, comments_pros, perl = TRUE), "Y", "N"))
+
+# Apply the pattern to cons comments, creating a new column in TEST2 directly
+TEST2 <- TEST2 %>%
+  mutate(international_opportunities = ifelse(grepl(international_opportunities_pattern, comments_cons, perl = TRUE), "Y", "N"))
+```
+Company reputation category
+```{r}
+# Define patterns for company reputation comments
+company_reputation <- c(
+  '\\breputation\\b',
+  '\\bmarket\\s?position\\b',
+  '\\bindustry\\s?leader(?:ship)?\\b',
+  '\\binnovation\\b'
+)
+
+company_reputation_pattern <- paste(company_reputation, collapse = "|")
+
+# Apply the pattern to pros comments, creating a new column in TEST directly
+TEST <- TEST %>%
+  mutate(company_reputation = ifelse(grepl(company_reputation_pattern, comments_pros, perl = TRUE), "Y", "N"))
+
+# Apply the pattern to cons comments, creating a new column in TEST2 directly
+TEST2 <- TEST2 %>%
+  mutate(company_reputation = ifelse(grepl(company_reputation_pattern, comments_cons, perl = TRUE), "Y", "N"))
+
+```
+Project management category
+```{r}
+# Define patterns for project management comments
+project_management <- c(
+  '\\bproject\\b',
+  '\\bvariety\\b',
+  '\\bcomplex\\b',
+  '\\bsupport\\b'
+)
+
+project_management_pattern <- paste(project_management, collapse = "|")
+
+# Apply the pattern to pros comments, creating a new column in TEST directly
+TEST <- TEST %>%
+  mutate(project_management = ifelse(grepl(project_management_pattern, comments_pros, perl = TRUE), "Y", "N"))
+
+# Apply the pattern to cons comments, creating a new column in TEST2 directly
+TEST2 <- TEST2 %>%
+  mutate(project_management = ifelse(grepl(project_management_pattern, comments_cons, perl = TRUE), "Y", "N"))
+```
+
